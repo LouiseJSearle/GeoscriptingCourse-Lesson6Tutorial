@@ -5,7 +5,6 @@
 
 ## 7.0 Example
 ## A simple land cover classification of Wageningen from Landsat 8 data
-
 library(raster)
 library(downloader)
 
@@ -69,3 +68,77 @@ plot(waterUTM, col = 'blue', add = TRUE)
 
 ## 7.1 Build a calibration dataset in Google Earth
 
+# Change to the correct file path and layer name
+samples <- readOGR('data/CalibrationData.kml', layer = 'CalibrationData')
+
+# Re-project SpatialPointsDataFrame
+samplesUTM <- spTransform(samples, CRS(proj4string(wagLandsatCrop)))
+
+# The extract function does not understand why the object would have 3 coord columns, so we need to edit this field
+samplesUTM@coords <- coordinates(samplesUTM)[,-3]
+
+# Extract the surface reflectance 
+calib <- extract(wagLandsatCrop, samplesUTM, df=TRUE)
+
+# Combine the newly created dataframe to the description column of the calibration dataset
+calib2 <- cbind(samplesUTM$Description, calib)
+
+# Change the name of the first column, for convienience
+colnames(calib2)[1] <- 'lc'
+
+# Inspect the structure of the dataframe
+str(calib2)
+
+#  calibrate a random forest model using the extracted data frame.
+install.packages('randomForest')
+library(randomForest)
+
+# Calibrate model
+model <- randomForest(lc ~ band1 + band2 + band3 + band4 + band5 + band6 + band7, data = calib2)
+
+# Use the model to predict land cover
+lcMap <- predict(wagLandsatCrop, model = model)
+
+# The function levelplot() from the rasterVis package is a convenient function to plot categorical raster data.
+library(rasterVis)
+
+levelplot(lcMap, col.regions = c('lightgreen', 'mediumseagreen', 'lightgoldenrod', 'lightyellow4', 'lightskyblue1'))
+
+## 7.2 Extract raster values along a transect
+
+# Download data
+bel <- getData('alt', country='BEL', mask=TRUE)
+
+# Display metadata
+bel
+plot(bel)
+
+# We want to look at a transect, which we can draw by hand by selecting two points by clicking
+line <- drawLine()
+
+#Then the elevation values can simply be extracted using extract().
+alt <- extract(bel, line, along = TRUE)
+plot(alt[[1]], type = 'l')
+
+# calculate the distance between the two extremities of the transect,
+install.packages('geosphere')
+library(geosphere)
+
+# Calculate great circle distance between the two ends of the line
+dist <- distHaversine(coordinates(line)[[1]][[1]][1,], coordinates(line)[[1]][[1]][2,])
+
+# Format a vector for use as x axis index
+distanceVector <- seq(0, dist, along.with = alt[[1]])
+
+# Visualize the output
+# Set graphical parameters (grid with 2 rows and 1 column)
+opar <- par(mfrow = c(2,1))
+plot(bel, main = 'Altitude (m)')
+plot(line, add = TRUE)
+plot(distanceVector/1000, alt[[1]], type = 'l',
+     main = 'Altitude transect Belgium',
+     xlab = 'Distance (Km)',
+     ylab = 'Altitude (m)',
+     las = 1)
+# Reset graphical parameters to default
+par(opar)
